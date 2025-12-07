@@ -11,6 +11,7 @@
         timer,
         user_tokens,
         web_explorer_uri_addr,
+        search,
     } from "$lib/common/store";
     import MyProjects from "./MyProjects.svelte";
     import MyContributions from "./MyContributions.svelte";
@@ -71,11 +72,40 @@
             await loadProjectById(projectId, platform);
         }
 
+        // Read initial search parameter from URL and apply to shared `search` store
+        const initialSearch = $page.url.searchParams.get("search") || "";
+        search.set(initialSearch);
+
+        // Handle browser back/forward navigation to keep search and project in sync
+        function handlePopState() {
+            try {
+                const url = new URL(window.location.href);
+                const s = url.searchParams.get("search") || "";
+                search.set(s);
+
+                const projectIdInner = url.searchParams.get("project") || url.searchParams.get("campaign");
+                const chain = url.searchParams.get("chain");
+                if (projectIdInner && chain == platform.id) {
+                    // load project detail if it differs
+                    loadProjectById(projectIdInner, platform).catch((e) => console.error(e));
+                } else {
+                    project_detail.set(null);
+                }
+            } catch (err) {
+                console.warn('Error handling popstate for search sync', err);
+            }
+        }
+
+        window.addEventListener('popstate', handlePopState);
+
         // Setup footer scrolling text
         scrollingTextElement?.addEventListener(
             "animationiteration",
             handleAnimationIteration,
         );
+
+        // Clean up popstate listener when component is destroyed
+        // (we return from onMount below; add cleanup there)
     });
 
     onDestroy(() => {
@@ -83,6 +113,11 @@
             "animationiteration",
             handleAnimationIteration,
         );
+        try {
+            window.removeEventListener('popstate', () => {});
+        } catch (err) {
+            // ignore in non-browser
+        }
     });
 
     // Subscribe to new wallet system instead of old connected store
@@ -144,6 +179,9 @@
     }
     getCurrentHeight();
 
+    // Keep track of last pushed url components so we don't spam history
+    let lastPushed = { projectId: null as string | null, search: "" };
+
     async function changeUrl(project: Project | null) {
         if (typeof window === "undefined") return;
 
@@ -158,10 +196,32 @@
             url.searchParams.delete("campaign");
         }
 
-        window.history.pushState({}, "", url);
+        const currentSearch = get(search) || "";
+        if (currentSearch) {
+            url.searchParams.set("search", currentSearch);
+        } else {
+            url.searchParams.delete("search");
+        }
+
+        const newProjectId = project ? project.project_id : null;
+        const projectChanged = newProjectId !== lastPushed.projectId;
+        const searchChanged = currentSearch !== lastPushed.search;
+
+        if (projectChanged) {
+            window.history.pushState({}, "", url);
+        } else if (searchChanged) {
+            // replace rather than push for frequent search updates
+            window.history.replaceState({}, "", url);
+        }
+
+        lastPushed = { projectId: newProjectId, search: currentSearch };
     }
 
-    $: changeUrl($project_detail);
+    // Re-run changeUrl whenever project_detail or `search` store changes
+    $: {
+        const _s = $search; // track search
+        changeUrl($project_detail);
+    }
 
     // Function to update wallet information periodically
     async function updateWalletInfo() {

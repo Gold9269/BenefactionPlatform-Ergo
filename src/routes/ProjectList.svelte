@@ -2,7 +2,7 @@
     import ProjectCard from "./ProjectCard.svelte";
     import ProjectCardSkeleton from "./ProjectCardSkeleton.svelte";
     import { type Project } from "$lib/common/project";
-    import { projects } from "$lib/common/store";
+    import { projects, search } from "$lib/common/store";
     import { fetchProjects } from "$lib/ergo/fetch";
     import * as Alert from "$lib/components/ui/alert";
     import { Loader2, Search, Filter } from "lucide-svelte";
@@ -19,7 +19,13 @@
     let isFiltering: boolean = false;
     let totalProjectsCount: number = 0;
 
+    // Local search query; kept in sync with the shared `search` store so URL and lists stay in sync.
     let searchQuery: string = "";
+
+    // Subscribe to shared search store so that URL changes / back-forward navigation update this view.
+    const unsubscribeSearch = search.subscribe((v) => {
+        searchQuery = v ?? "";
+    });
     let sortBy: "newest" | "oldest" | "amount" | "name" = "newest";
     let hideTestProjects: boolean = true;
     let filterOpen = false;
@@ -140,6 +146,11 @@
         }, 300);
     }
 
+    // Keep shared store updated when the local input changes (two-way sync).
+    $: if (searchQuery !== undefined) {
+        search.set(searchQuery);
+    }
+
     async function handleSortChange(
         newSort: "newest" | "oldest" | "amount" | "name",
     ) {
@@ -177,6 +188,7 @@
 
     onDestroy(() => {
         unsubscribeProjects();
+        unsubscribeSearch();
         if (debouncedSearch) clearTimeout(debouncedSearch);
     });
 </script>
